@@ -104,7 +104,7 @@ func handleEncrypt(args []string) {
 	}
 
 	fmt.Printf("Encrypting %s (%s)...\n", selectedDrive.Name, selectedDrive.Path)
-	fmt.Println("Warning: This will erase all data on the drive!")
+	fmt.Println("Warning: This will encrypt all data on the drive.")
 
 	reader := bufio.NewReader(os.Stdin)
 	fmt.Print("Are you sure? (yes/no): ")
@@ -222,7 +222,7 @@ func handleEncryptHidden(args []string) {
 	}
 
 	fmt.Printf("Encrypting %s with hidden volume...\n", selectedDrive.Name, selectedDrive.Path)
-	fmt.Println("Warning: This will erase all data on the drive!")
+	fmt.Println("Warning: This will encrypt all data on the drive.")
 
 	reader := bufio.NewReader(os.Stdin)
 	fmt.Print("Are you sure? (yes/no): ")
