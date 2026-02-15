@@ -2,9 +2,11 @@ package drive
 
 import (
 	"fmt"
+	"os/exec"
 	"runtime"
 
 	"github.com/encrypto/encrypto/internal/crypto"
+	"github.com/encrypto/encrypto/internal/ui"
 )
 
 type Drive struct {
@@ -242,7 +244,7 @@ func (m *Manager) Decrypt(drive *Drive, password []byte) error {
 		return fmt.Errorf("invalid password")
 	}
 
-	if err := m.decryptData(handle, key); err != nil {
+	if err := m.decryptData(handle, key, int64(drive.Size)); err != nil {
 		return err
 	}
 
@@ -255,6 +257,87 @@ func (m *Manager) Lock(drive *Drive) error {
 	}
 
 	return nil
+}
+
+// Status represents the encryption status of a drive
+type Status struct {
+	IsEncrypted bool
+	HasHidden   bool
+	Version     uint32
+	IsMounted   bool
+	DeviceName  string
+	DevicePath  string
+	Error       string
+}
+
+// CheckStatus checks if a drive is encrypted and returns its status
+func (m *Manager) CheckStatus(drivePath string) (*Status, error) {
+	status := &Status{
+		DevicePath: drivePath,
+	}
+
+	// Try to open the drive
+	handle, err := m.openDrive(drivePath)
+	if err != nil {
+		status.Error = fmt.Sprintf("Cannot open drive: %v", err)
+		return status, nil
+	}
+	defer handle.Close()
+
+	// Try to read header
+	header, err := m.readHeader(handle)
+	if err != nil {
+		// No valid header found - drive is not encrypted
+		status.IsEncrypted = false
+		return status, nil
+	}
+
+	// Check magic
+	if string(header.Magic[:]) != HeaderMagic {
+		status.IsEncrypted = false
+		status.Error = "Invalid header magic"
+		return status, nil
+	}
+
+	// Drive is encrypted
+	status.IsEncrypted = true
+	status.Version = header.Version
+	status.HasHidden = header.HasHidden
+
+	// Check if mounted (platform-specific)
+	status.IsMounted = m.isDriveMounted(drivePath)
+
+	return status, nil
+}
+
+// isDriveMounted checks if a drive is currently mounted
+func (m *Manager) isDriveMounted(path string) bool {
+	switch runtime.GOOS {
+	case "darwin":
+		return m.isDriveMountedDarwin(path)
+	case "windows":
+		return m.isDriveMountedWindows(path)
+	case "linux":
+		return m.isDriveMountedLinux(path)
+	default:
+		return false
+	}
+}
+
+func (m *Manager) isDriveMountedDarwin(path string) bool {
+	// Use diskutil to check mount status
+	_, err := runCommand("diskutil", "info", path)
+	return err == nil
+}
+
+func (m *Manager) isDriveMountedWindows(path string) bool {
+	// TODO: Implement for Windows
+	return false
+}
+
+func (m *Manager) isDriveMountedLinux(path string) bool {
+	// TODO: Implement for Linux
+	return false
 }
 
 func (m *Manager) listWindows() []Drive {
@@ -326,7 +409,10 @@ func (m *Manager) encryptData(handle DriveHandle, key []byte, totalSize int64) e
 	sectorNum := uint64(1) // Sector 0 is header, data starts at sector 1
 	offset := int64(sectorSize)
 	bytesProcessed := int64(0)
-	lastReportedPercent := int64(-1)
+
+	// Create and start retro progress bar
+	progress := ui.NewRetroProgress(totalSize)
+	progress.Start("ENCRYPTING")
 
 	for {
 		n, err := handle.Read(offset, buf)
@@ -341,26 +427,24 @@ func (m *Manager) encryptData(handle DriveHandle, key []byte, totalSize int64) e
 		dataToEncrypt := buf[:n]
 		ciphertext, err := cryptoEngine.Encrypt(dataToEncrypt, key, sectorNum)
 		if err != nil {
+			progress.Stop(false, "")
 			return fmt.Errorf("encryption failed at sector %d: %w", sectorNum, err)
 		}
 
 		if err := handle.Write(offset, ciphertext); err != nil {
+			progress.Stop(false, "")
 			return fmt.Errorf("write failed at sector %d: %w", sectorNum, err)
 		}
 
-		// Progress reporting
+		// Update progress
 		bytesProcessed += int64(n)
-		if totalSize > 0 {
-			percent := (bytesProcessed * 100) / totalSize
-			if percent != lastReportedPercent {
-				lastReportedPercent = percent
-			}
-		}
+		progress.Update(bytesProcessed)
 
 		sectorNum++
 		offset += int64(n)
 	}
 
+	progress.Stop(true, "ENCRYPTION COMPLETE")
 	return nil
 }
 
@@ -399,12 +483,17 @@ func (m *Manager) encryptHiddenData(handle DriveHandle, key []byte) error {
 	return nil
 }
 
-func (m *Manager) decryptData(handle DriveHandle, key []byte) error {
+func (m *Manager) decryptData(handle DriveHandle, key []byte, totalSize int64) error {
 	cryptoEngine := crypto.New()
 	sectorSize := 512
 	buf := make([]byte, sectorSize)
 	sectorNum := uint64(1) // Sector 0 is header, data starts at sector 1
 	offset := int64(sectorSize)
+	bytesProcessed := int64(0)
+
+	// Create and start retro progress bar
+	progress := ui.NewRetroProgress(totalSize)
+	progress.Start("DECRYPTING")
 
 	for {
 		n, err := handle.Read(offset, buf)
@@ -419,17 +508,24 @@ func (m *Manager) decryptData(handle DriveHandle, key []byte) error {
 		dataToDecrypt := buf[:n]
 		plaintext, err := cryptoEngine.Decrypt(dataToDecrypt, key, sectorNum)
 		if err != nil {
+			progress.Stop(false, "")
 			return fmt.Errorf("decryption failed at sector %d: %w", sectorNum, err)
 		}
 
 		if err := handle.Write(offset, plaintext); err != nil {
+			progress.Stop(false, "")
 			return fmt.Errorf("write failed at sector %d: %w", sectorNum, err)
 		}
+
+		// Update progress
+		bytesProcessed += int64(n)
+		progress.Update(bytesProcessed)
 
 		sectorNum++
 		offset += int64(n)
 	}
 
+	progress.Stop(true, "DECRYPTION COMPLETE")
 	return nil
 }
 
@@ -468,7 +564,9 @@ func (m *Manager) unmountDrive(path string) error {
 }
 
 func runCommand(name string, args ...string) (string, error) {
-	return "", nil
+	cmd := exec.Command(name, args...)
+	output, err := cmd.CombinedOutput()
+	return string(output), err
 }
 
 func parseWindowsOutput(output string) []Drive {

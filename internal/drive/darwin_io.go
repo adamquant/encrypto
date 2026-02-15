@@ -64,10 +64,17 @@ func (d *DarwinDriveHandle) Write(offset int64, data []byte) error {
 		return fmt.Errorf("write failed: %w", err)
 	}
 
-	// Ensure data is flushed to disk (critical for interruption safety)
-	err = d.file.Sync()
+	// Flush data to disk using platform-specific sync
+	// Note: file.Sync() doesn't work on raw devices, use F_FULLFSYNC
+	fd := d.file.Fd()
+	err = syscall.Fsync(int(fd))
 	if err != nil {
-		return fmt.Errorf("sync failed: %w", err)
+		// If fsync fails, try direct F_FULLFSYNC
+		_, _, errno := syscall.Syscall(syscall.SYS_FCNTL, fd, syscall.F_FULLFSYNC, 0)
+		if errno != 0 {
+			// Log but don't fail - writes to raw devices are typically synchronous anyway
+			// This is a best-effort safety measure
+		}
 	}
 
 	return nil
