@@ -89,6 +89,12 @@ func (m *Manager) Encrypt(drive *Drive, password []byte) error {
 	}
 	defer handle.Close()
 
+	// Check if already encrypted
+	existingHeader, err := m.readHeader(handle)
+	if err == nil && string(existingHeader.Magic[:]) == HeaderMagic {
+		return fmt.Errorf("drive is already encrypted")
+	}
+
 	header, err := createHeader(password)
 	if err != nil {
 		return err
@@ -102,7 +108,7 @@ func (m *Manager) Encrypt(drive *Drive, password []byte) error {
 		return err
 	}
 
-	if err := m.encryptData(handle, key); err != nil {
+	if err := m.encryptData(handle, key, int64(drive.Size)); err != nil {
 		return err
 	}
 
@@ -137,7 +143,7 @@ func (m *Manager) EncryptWithHidden(drive *Drive, primaryPassword, hiddenPasswor
 		return err
 	}
 
-	if err := m.encryptData(handle, key); err != nil {
+	if err := m.encryptData(handle, key, int64(drive.Size)); err != nil {
 		return err
 	}
 
@@ -200,6 +206,43 @@ func (m *Manager) UnlockWithHidden(drive *Drive, password []byte, revealHidden b
 	}
 
 	if err := m.mountDrive(drive.Path); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (m *Manager) Decrypt(drive *Drive, password []byte) error {
+	if !drive.IsRemovable {
+		return fmt.Errorf("drive is not removable: %s", drive.Path)
+	}
+
+	handle, err := m.openDrive(drive.Path)
+	if err != nil {
+		return err
+	}
+	defer handle.Close()
+
+	header, err := m.readHeader(handle)
+	if err != nil {
+		return fmt.Errorf("failed to read header: %w", err)
+	}
+
+	// Verify this is an encrypto drive
+	if string(header.Magic[:]) != HeaderMagic {
+		return fmt.Errorf("drive is not encrypted with encrypto")
+	}
+
+	key, _, err := deriveKeyFromPassword(password, header)
+	if err != nil {
+		return err
+	}
+
+	if !verifyKey(key, header) {
+		return fmt.Errorf("invalid password")
+	}
+
+	if err := m.decryptData(handle, key); err != nil {
 		return err
 	}
 
@@ -276,9 +319,14 @@ func (m *Manager) readHeader(handle DriveHandle) (Header, error) {
 	return header, nil
 }
 
-func (m *Manager) encryptData(handle DriveHandle, key []byte) error {
-	buf := make([]byte, 4096)
-	offset := int64(512)
+func (m *Manager) encryptData(handle DriveHandle, key []byte, totalSize int64) error {
+	cryptoEngine := crypto.New()
+	sectorSize := 512
+	buf := make([]byte, sectorSize)
+	sectorNum := uint64(1) // Sector 0 is header, data starts at sector 1
+	offset := int64(sectorSize)
+	bytesProcessed := int64(0)
+	lastReportedPercent := int64(-1)
 
 	for {
 		n, err := handle.Read(offset, buf)
@@ -289,13 +337,27 @@ func (m *Manager) encryptData(handle DriveHandle, key []byte) error {
 			break
 		}
 
-		ciphertext := make([]byte, n)
-		copy(ciphertext, buf[:n])
-
-		if err := handle.Write(offset, ciphertext); err != nil {
-			return err
+		// Encrypt only the bytes we actually read
+		dataToEncrypt := buf[:n]
+		ciphertext, err := cryptoEngine.Encrypt(dataToEncrypt, key, sectorNum)
+		if err != nil {
+			return fmt.Errorf("encryption failed at sector %d: %w", sectorNum, err)
 		}
 
+		if err := handle.Write(offset, ciphertext); err != nil {
+			return fmt.Errorf("write failed at sector %d: %w", sectorNum, err)
+		}
+
+		// Progress reporting
+		bytesProcessed += int64(n)
+		if totalSize > 0 {
+			percent := (bytesProcessed * 100) / totalSize
+			if percent != lastReportedPercent {
+				lastReportedPercent = percent
+			}
+		}
+
+		sectorNum++
 		offset += int64(n)
 	}
 
@@ -303,7 +365,11 @@ func (m *Manager) encryptData(handle DriveHandle, key []byte) error {
 }
 
 func (m *Manager) encryptHiddenData(handle DriveHandle, key []byte) error {
-	buf := make([]byte, 4096)
+	cryptoEngine := crypto.New()
+	sectorSize := 512
+	buf := make([]byte, sectorSize)
+	// Hidden volume starts at 1MB offset (sector 2048)
+	sectorNum := uint64(2048)
 	offset := int64(1024 * 1024)
 
 	for {
@@ -315,13 +381,52 @@ func (m *Manager) encryptHiddenData(handle DriveHandle, key []byte) error {
 			break
 		}
 
-		ciphertext := make([]byte, n)
-		copy(ciphertext, buf[:n])
-
-		if err := handle.Write(offset, ciphertext); err != nil {
-			return err
+		// Encrypt only the bytes we actually read
+		dataToEncrypt := buf[:n]
+		ciphertext, err := cryptoEngine.Encrypt(dataToEncrypt, key, sectorNum)
+		if err != nil {
+			return fmt.Errorf("encryption failed at sector %d: %w", sectorNum, err)
 		}
 
+		if err := handle.Write(offset, ciphertext); err != nil {
+			return fmt.Errorf("write failed at sector %d: %w", sectorNum, err)
+		}
+
+		sectorNum++
+		offset += int64(n)
+	}
+
+	return nil
+}
+
+func (m *Manager) decryptData(handle DriveHandle, key []byte) error {
+	cryptoEngine := crypto.New()
+	sectorSize := 512
+	buf := make([]byte, sectorSize)
+	sectorNum := uint64(1) // Sector 0 is header, data starts at sector 1
+	offset := int64(sectorSize)
+
+	for {
+		n, err := handle.Read(offset, buf)
+		if err != nil {
+			break
+		}
+		if n == 0 {
+			break
+		}
+
+		// Decrypt only the bytes we actually read
+		dataToDecrypt := buf[:n]
+		plaintext, err := cryptoEngine.Decrypt(dataToDecrypt, key, sectorNum)
+		if err != nil {
+			return fmt.Errorf("decryption failed at sector %d: %w", sectorNum, err)
+		}
+
+		if err := handle.Write(offset, plaintext); err != nil {
+			return fmt.Errorf("write failed at sector %d: %w", sectorNum, err)
+		}
+
+		sectorNum++
 		offset += int64(n)
 	}
 
@@ -392,10 +497,6 @@ func parseLinuxOutput(output string) []Drive {
 	})
 
 	return drives
-}
-
-func openDarwinDrive(path string) (DriveHandle, error) {
-	return nil, fmt.Errorf("open not implemented for darwin")
 }
 
 func openWindowsDrive(path string) (DriveHandle, error) {

@@ -22,6 +22,8 @@ func main() {
 	switch command {
 	case "encrypt":
 		handleEncrypt(os.Args[2:])
+	case "decrypt":
+		handleDecrypt(os.Args[2:])
 	case "unlock":
 		handleUnlock(os.Args[2:])
 	case "list":
@@ -40,6 +42,7 @@ func printUsage() {
 	fmt.Println()
 	fmt.Println("Usage:")
 	fmt.Println("  encrypto encrypt <drive-path>     Encrypt a drive")
+	fmt.Println("  encrypto decrypt <drive-path>     Decrypt a drive")
 	fmt.Println("  encrypto unlock <drive-path>      Unlock an encrypted drive")
 	fmt.Println("  encrypto list                     List available drives")
 	fmt.Println("  encrypto encrypt-hidden <drive>   Encrypt with hidden volume")
@@ -109,7 +112,7 @@ func handleEncrypt(args []string) {
 	reader := bufio.NewReader(os.Stdin)
 	fmt.Print("Are you sure? (yes/no): ")
 	confirm, _ := reader.ReadString('\n')
-	if strings.TrimSpace(strings.ToLower(confirm)) != "yes\n" {
+	if strings.TrimSpace(strings.ToLower(confirm)) != "yes" {
 		fmt.Println("Encryption cancelled")
 		return
 	}
@@ -140,6 +143,61 @@ func handleEncrypt(args []string) {
 	}
 
 	fmt.Println("Drive encrypted successfully")
+}
+
+func handleDecrypt(args []string) {
+	if len(args) < 1 {
+		fmt.Println("Usage: encrypto decrypt <drive-path>")
+		os.Exit(1)
+	}
+
+	drivePath := args[0]
+
+	manager := drive.NewManager()
+	drives, err := manager.List()
+	if err != nil {
+		fmt.Printf("Error listing drives: %v\n", err)
+		os.Exit(1)
+	}
+
+	var selectedDrive *drive.Drive
+	for _, d := range drives {
+		if d.Path == drivePath {
+			selectedDrive = &d
+			break
+		}
+	}
+
+	if selectedDrive == nil {
+		fmt.Printf("Drive not found: %s\n", drivePath)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Decrypting %s (%s)...\n", selectedDrive.Name, selectedDrive.Path)
+	fmt.Println("Warning: This will decrypt all data on the drive.")
+
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Print("Are you sure? (yes/no): ")
+	confirm, _ := reader.ReadString('\n')
+	if strings.TrimSpace(strings.ToLower(confirm)) != "yes" {
+		fmt.Println("Decryption cancelled")
+		return
+	}
+
+	fmt.Print("Enter password: ")
+	password, err := readPassword()
+	if err != nil {
+		fmt.Printf("Error reading password: %v\n", err)
+		os.Exit(1)
+	}
+
+	err = manager.Decrypt(selectedDrive, password)
+	if err != nil {
+		fmt.Printf("Decryption failed: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Println("Drive decrypted successfully")
 }
 
 func handleUnlock(args []string) {
@@ -227,7 +285,7 @@ func handleEncryptHidden(args []string) {
 	reader := bufio.NewReader(os.Stdin)
 	fmt.Print("Are you sure? (yes/no): ")
 	confirm, _ := reader.ReadString('\n')
-	if strings.TrimSpace(strings.ToLower(confirm)) != "yes\n" {
+	if strings.TrimSpace(strings.ToLower(confirm)) != "yes" {
 		fmt.Println("Encryption cancelled")
 		return
 	}
