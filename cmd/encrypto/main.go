@@ -53,8 +53,12 @@ func printUsage() {
 	fmt.Println("Usage:")
 	fmt.Println("  encrypto encrypt <drive-path>          Encrypt a drive (60+ min)")
 	fmt.Println("  encrypto decrypt <drive-path>          Decrypt a drive (60+ min)")
-	fmt.Println("  encrypt-file <file> <output>           Encrypt a file (instant)")
-	fmt.Println("  decrypt-file <file> <output>           Decrypt a file (instant)")
+	fmt.Println("  encrypt-file <file> [output]           Encrypt a file (instant)")
+	fmt.Println("    1 arg:  Encrypt in-place (replaces original)")
+	fmt.Println("    2 args: Create new encrypted file")
+	fmt.Println("  decrypt-file <file> [output]           Decrypt a file (instant)")
+	fmt.Println("    1 arg:  Decrypt in-place (replaces encrypted file)")
+	fmt.Println("    2 args: Create new decrypted file")
 	fmt.Println("  encrypto unlock <drive-path>           Unlock an encrypted drive")
 	fmt.Println("  encrypto lock <drive-path>             Lock (unmount) a drive")
 	fmt.Println("  encrypto status <drive-path>           Check drive encryption status")
@@ -215,13 +219,22 @@ func handleDecrypt(args []string) {
 }
 
 func handleEncryptFile(args []string) {
-	if len(args) < 2 {
-		fmt.Println("Usage: encrypto encrypt-file <input-file> <output-file>")
+	if len(args) < 1 {
+		fmt.Println("Usage: encrypto encrypt-file <input-file> [output-file]")
+		fmt.Println("  1 arg:  In-place encryption (replaces original file)")
+		fmt.Println("  2 args: Create new encrypted file")
 		os.Exit(1)
 	}
 
 	inputPath := args[0]
-	outputPath := args[1]
+	inPlace := len(args) == 1
+	var outputPath string
+
+	if inPlace {
+		outputPath = inputPath + ".tmp.enc"
+	} else {
+		outputPath = args[1]
+	}
 
 	fmt.Printf("Encrypting file: %s\n", inputPath)
 	fmt.Print("Enter password: ")
@@ -249,17 +262,38 @@ func handleEncryptFile(args []string) {
 		os.Exit(1)
 	}
 
-	fmt.Printf("File encrypted successfully: %s\n", outputPath)
+	if inPlace {
+		// Replace original with encrypted version
+		if err := os.Remove(inputPath); err != nil {
+			fmt.Printf("Warning: Could not remove original file: %v\n", err)
+		}
+		if err := os.Rename(outputPath, inputPath); err != nil {
+			fmt.Printf("Error: Could not rename encrypted file: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("✓ File encrypted in-place: %s\n", inputPath)
+	} else {
+		fmt.Printf("✓ File encrypted: %s\n", outputPath)
+	}
 }
 
 func handleDecryptFile(args []string) {
-	if len(args) < 2 {
-		fmt.Println("Usage: encrypto decrypt-file <input-file> <output-file>")
+	if len(args) < 1 {
+		fmt.Println("Usage: encrypto decrypt-file <input-file> [output-file]")
+		fmt.Println("  1 arg:  In-place decryption (replaces encrypted file)")
+		fmt.Println("  2 args: Create new decrypted file")
 		os.Exit(1)
 	}
 
 	inputPath := args[0]
-	outputPath := args[1]
+	inPlace := len(args) == 1
+	var outputPath string
+
+	if inPlace {
+		outputPath = inputPath + ".tmp.dec"
+	} else {
+		outputPath = args[1]
+	}
 
 	fmt.Printf("Decrypting file: %s\n", inputPath)
 	fmt.Print("Enter password: ")
@@ -275,7 +309,19 @@ func handleDecryptFile(args []string) {
 		os.Exit(1)
 	}
 
-	fmt.Printf("File decrypted successfully: %s\n", outputPath)
+	if inPlace {
+		// Replace encrypted with decrypted version
+		if err := os.Remove(inputPath); err != nil {
+			fmt.Printf("Warning: Could not remove encrypted file: %v\n", err)
+		}
+		if err := os.Rename(outputPath, inputPath); err != nil {
+			fmt.Printf("Error: Could not rename decrypted file: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("✓ File decrypted in-place: %s\n", inputPath)
+	} else {
+		fmt.Printf("✓ File decrypted: %s\n", outputPath)
+	}
 }
 
 func handleLock(args []string) {
