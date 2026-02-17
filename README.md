@@ -12,8 +12,8 @@ this tool if needed.
 All commands accept any of these path formats and resolve them automatically:
 
     /dev/disk4
-    /Volumes/Extreme SSD
-    /Volumes/Extreme SSD/
+    /Volumes/MyDrive
+    /Volumes/MyDrive/
 
 Use `./encrypto list` to see all connected drives with their device paths and
 mount points.
@@ -30,7 +30,7 @@ before proceeding. Reformatting erases the drive, so back up first.
 
 Enable encryption:
 
-    sudo ./encrypto encrypt "/Volumes/Extreme SSD"
+    sudo ./encrypto encrypt "/Volumes/MyDrive"
 
 Your existing files are not deleted. Encryption runs in the background and the
 drive is immediately usable. On a large drive the background conversion may take
@@ -38,20 +38,20 @@ some time, but you do not need to wait for it.
 
 Check status:
 
-    ./encrypto status "/Volumes/Extreme SSD"
+    ./encrypto status "/Volumes/MyDrive"
 
 
 ## Daily use
 
 Unlock the drive when you plug it in:
 
-    sudo ./encrypto unlock "/Volumes/Extreme SSD"
+    sudo ./encrypto unlock "/Volumes/MyDrive"
 
 Enter your password. The drive mounts and appears in Finder as normal.
 
 Lock it when you are done:
 
-    sudo ./encrypto lock "/Volumes/Extreme SSD"
+    sudo ./encrypto lock "/Volumes/MyDrive"
 
 The drive unmounts and is inaccessible without the password. It is safe to
 physically remove it after locking.
@@ -61,7 +61,7 @@ physically remove it after locking.
 
 To go back to a plain unencrypted drive:
 
-    sudo ./encrypto decrypt "/Volumes/Extreme SSD"
+    sudo ./encrypto decrypt "/Volumes/MyDrive"
 
 Your data is preserved throughout. The drive runs in the background converting
 back to unencrypted, same as the initial encryption.
@@ -93,7 +93,7 @@ No output means byte-for-byte identical.
 
 ## Check drive or folder size
 
-    ./encrypto size "/Volumes/Extreme SSD"
+    ./encrypto size "/Volumes/MyDrive"
     ./encrypto size /dev/disk4
     ./encrypto size ~/Documents
     ./encrypto size report.pdf

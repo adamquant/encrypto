@@ -1,0 +1,9 @@
+# Compiled binary
+encrypto
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
