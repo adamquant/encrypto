@@ -154,7 +154,7 @@ func deriveKeyFromPassword(password []byte, header Header) ([]byte, bool, error)
 		if err != nil {
 			return nil, false, err
 		}
-		if verifyKey(hiddenHashedKey, header) {
+		if sha256.Sum256(hiddenHashedKey) == sha256.Sum256(header.HashedHiddenKey[:]) {
 			return hiddenHashedKey, true, nil
 		}
 

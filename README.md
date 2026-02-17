@@ -1,231 +1,174 @@
-# 🔐 encrypto
+# encrypto
 
-Cross-platform full disk encryption for external drives (similar to BitLocker/FileVault).
+Password-protect external drives and encrypt individual files. Drive encryption
+uses macOS native FileVault (APFS) so your existing data is preserved and the
+drive works normally after unlocking. File encryption uses AES-256-GCM with
+Argon2id key derivation — standard algorithms you can decrypt independently of
+this tool if needed.
 
-## ✨ Features
 
-- **Full Disk Encryption (FDE)** using AES-256-XTS for maximum security
-- **File Encryption** for instant encryption of individual files
-- **Password protection** with Argon2id key derivation (military-grade)
-- **Cross-platform** support (macOS, Windows, Linux)
-- **Hidden volume support** for plausible deniability
-- **Retro 80s-style progress bar** with real-time updates
-- **Safe interruption handling** - Ctrl+C safely aborts without corrupting data
+## Paths
 
-## 🚀 Quick Start
+All commands accept any of these path formats and resolve them automatically:
 
-### Building
+    /dev/disk4
+    /Volumes/Extreme SSD
+    /Volumes/Extreme SSD/
 
-```bash
-go build -o encrypto ./cmd/encrypto
-```
+Use `./encrypto list` to see all connected drives with their device paths and
+mount points.
 
-### Basic Commands
 
-```bash
-# See all available drives
-./encrypto list
+## Drive encryption
 
-# Check if a drive is encrypted
-./encrypto status /dev/disk4
-```
+Encryption is a one-time setup. After it is done you unlock and lock the drive
+for daily use — you do not re-encrypt it each time.
 
-## 📁 File Encryption (Instant)
+The drive must be formatted as APFS. Most modern external drives on macOS
+already are. If yours is not, reformat it in Disk Utility (Erase, choose APFS)
+before proceeding. Reformatting erases the drive, so back up first.
 
-Encrypt individual files in **seconds** - perfect for testing and daily use:
+Enable encryption:
 
-```bash
-# Encrypt a file
-./encrypto encrypt-file secret.txt secret.txt.enc
-# Enter password: ********
-# Confirm password: ********
-# ✓ File encrypted: secret.txt.enc
+    sudo ./encrypto encrypt "/Volumes/Extreme SSD"
 
-# Decrypt it back
-./encrypto decrypt-file secret.txt.enc secret_restored.txt
-# Enter password: ********
-# ✓ File decrypted: secret_restored.txt
-```
+Your existing files are not deleted. Encryption runs in the background and the
+drive is immediately usable. On a large drive the background conversion may take
+some time, but you do not need to wait for it.
 
-**How it works:**
-- Uses AES-256-GCM encryption
-- Adds 40-byte header + authentication tag
-- Argon2id password hashing
-- Works on any file type (documents, images, videos, etc.)
+Check status:
 
-## 💾 Full Disk Encryption
+    ./encrypto status "/Volumes/Extreme SSD"
 
-**⚠️ Warning:** This will encrypt your ENTIRE drive and takes 30-60 minutes for large drives.
 
-### Encrypt a Drive (One-Time Setup)
+## Daily use
 
-```bash
-# 1. Unmount the drive first (macOS example)
-diskutil unmountDisk /dev/disk4
+Unlock the drive when you plug it in:
 
-# 2. Encrypt the entire drive
-sudo ./encrypto encrypt /dev/disk4
+    sudo ./encrypto unlock "/Volumes/Extreme SSD"
 
-# You will see:
-# Encrypting SanDisk 3.2Gen1 (/dev/disk4)...
-# Warning: This will encrypt all data on the drive.
-# Are you sure? (yes/no): yes
-# Enter password: ********
-# Confirm password: ********
-# 
-# [Green retro progress bar appears]
-# ╔══════════════════════════════════════════╗
-# ║  ENCRYPTO v1.0 - ENCRYPTING              ║
-# ║  [████████████████████░░░░░░░░░░░] 45.2% ║
-# ║  BYTES:   105.3 / 232.0 GB               ║
-# ║  SPEED:   78.5 MB/s                      ║
-# ║  ETA:     00:14:32                       ║
-# ╚══════════════════════════════════════════╝
-#
-# Drive encrypted successfully
-```
+Enter your password. The drive mounts and appears in Finder as normal.
 
-### Daily Use (After Encryption)
+Lock it when you are done:
 
-**Lock/Unlock Workflow:**
+    sudo ./encrypto lock "/Volumes/Extreme SSD"
 
-```bash
-# Unlock the drive (mount it)
-sudo ./encrypto unlock /dev/disk4
-# Enter password: ********
-# Drive unlocked successfully
+The drive unmounts and is inaccessible without the password. It is safe to
+physically remove it after locking.
 
-# The drive is now mounted and ready to use
-# Use your files normally through Finder/Explorer
 
-# When finished, lock the drive (unmount it)
-sudo ./encrypto lock /dev/disk4
-# Drive locked successfully
-```
+## Remove encryption
 
-**Key Points:**
-- **Encrypt/Decrypt**: One-time setup, takes 30-60 minutes
-- **Lock/Unlock**: Daily use, takes 2-5 seconds
-- After unlocking, use the drive like normal
-- Files remain encrypted on disk, decrypted on-the-fly
+To go back to a plain unencrypted drive:
 
-### Decrypt a Drive (Full Decryption)
+    sudo ./encrypto decrypt "/Volumes/Extreme SSD"
 
-```bash
-# Decrypt the entire drive back to plaintext
-sudo ./encrypto decrypt /dev/disk4
-# Enter password: ********
-# 
-# [Green retro progress bar shows decryption progress]
-#
-# Drive decrypted successfully
-```
+Your data is preserved throughout. The drive runs in the background converting
+back to unencrypted, same as the initial encryption.
 
-## 🔍 Checking Status
 
-```bash
-./encrypto status /dev/disk4
+## File encryption
 
-# Output:
-# ╔══════════════════════════════════════════╗
-# ║  ENCRYPTO STATUS CHECK                   ║
-# ║                                          ║
-# ║  DEVICE: SanDisk 3.2Gen1                  ║
-# ║  PATH:   /dev/disk4                       ║
-# ║                                          ║
-# ║  STATUS: 🔒 ENCRYPTED                    ║
-# ║  VERSION: 1                               ║
-# ║  HIDDEN:   No                             ║
-# ║                                          ║
-# ║  MOUNTED: No                             ║
-# ╚══════════════════════════════════════════╝
-```
+Encrypting a single file is instant. Good for testing your password before
+committing to a full drive operation.
 
-## 📋 Command Reference
+Encrypt a file (creates a new encrypted copy):
 
-### Drive Commands (Full Disk Encryption)
+    ./encrypto encrypt-file photo.jpg photo.jpg.enc
 
-| Command | Description | Time | Usage |
-|---------|-------------|------|-------|
-| `encrypt` | Encrypt entire drive | 30-60 min | `sudo ./encrypto encrypt /dev/diskX` |
-| `decrypt` | Decrypt entire drive | 30-60 min | `sudo ./encrypto decrypt /dev/diskX` |
-| `unlock` | Mount encrypted drive | 2-5 sec | `sudo ./encrypto unlock /dev/diskX` |
-| `lock` | Unmount drive | 2-5 sec | `sudo ./encrypto lock /dev/diskX` |
-| `status` | Check encryption status | Instant | `./encrypto status /dev/diskX` |
+Encrypt in-place (replaces the original):
 
-### File Commands (Instant Encryption)
+    ./encrypto encrypt-file photo.jpg
 
-| Command | Description | Time | Usage |
-|---------|-------------|------|-------|
-| `encrypt-file` | Encrypt a single file | Instant | `./encrypto encrypt-file input.txt output.enc` |
-| `decrypt-file` | Decrypt a single file | Instant | `./encrypto decrypt-file input.enc output.txt` |
+Decrypt:
 
-### Utility Commands
+    ./encrypto decrypt-file photo.jpg.enc photo_restored.jpg
 
-| Command | Description |
-|---------|-------------|
-| `list` | Show all available drives |
-| `encrypt-hidden` | Encrypt with hidden volume (plausible deniability) |
+Test that the restored file is identical:
 
-## 🖥️ Platform-Specific Notes
+    diff photo.jpg photo_restored.jpg
 
-### macOS
-- Drives appear as `/dev/disk0`, `/dev/disk1`, etc.
-- Use `diskutil list` to see drives
-- Requires `sudo` for raw disk access
-- Unmount first: `diskutil unmountDisk /dev/diskX`
+No output means byte-for-byte identical.
 
-### Linux
-- Drives appear as `/dev/sda`, `/dev/sdb`, etc.
-- Use `lsblk` to see drives
-- Requires `sudo` for raw disk access
-- Unmount first: `umount /dev/sdX1`
 
-### Windows
-- Drives appear as `\\.\PhysicalDrive0`, `D:`, etc.
-- Run as Administrator
-- Drives shown as `C:`, `D:`, etc.
+## Check drive or folder size
 
-## ⚠️ Important Warnings
+    ./encrypto size "/Volumes/Extreme SSD"
+    ./encrypto size /dev/disk4
+    ./encrypto size ~/Documents
+    ./encrypto size report.pdf
 
-1. **Backup First**: Always backup important data before encrypting
-2. **Don't Forget Password**: If you lose the password, data is **PERMANENTLY** lost
-3. **Interrupt Safety**: Press Ctrl+C anytime - encryption safely aborts
-4. **One-Time Encryption**: After encrypting, use `lock`/`unlock` for daily use (not re-encrypt)
-5. **sudo Required**: All drive operations require administrator privileges
+For volumes and directories, shows total capacity, used, and free. For files,
+shows file size.
 
-## 🏗️ Architecture
 
-- **Crypto**: AES-256-XTS (drives) / AES-256-GCM (files) with Argon2id key derivation
-- **Sector Size**: 512 bytes (standard for disk encryption)
-- **Header**: 512-byte metadata block at start of drive
-- **Sync**: Every sector written is immediately synced to disk (crash-safe)
+## Passwords
 
-## 📝 License
+- Use a long passphrase you can remember, not a random string you will forget
+- Write it down and store it somewhere physically safe
+- There is no password reset or recovery. A forgotten password means permanent
+  loss of access to the drive
+- Test encrypt and decrypt a single file before encrypting your drive to confirm
+  you have the password memorised correctly
 
-MIT License - See LICENSE file for details
 
-## 🐛 Troubleshooting
+## Decrypting files without this repo
 
-**"Permission denied" error:**
-- Use `sudo` before the command
-- Make sure drive is unmounted first
+File encryption uses published standards available in any language:
 
-**"Resource busy" error:**
-- Unmount the drive: `diskutil unmountDisk /dev/diskX` (macOS)
+    Encryption:     AES-256-GCM  (NIST SP 800-38D)
+    Key derivation: Argon2id     (RFC 9106)
+    Parameters:     time=3, memory=64MB, parallelism=4, salt=16 bytes
 
-**"Already encrypted" error:**
-- Drive already has encrypto header
-- Use `unlock` instead of `encrypt`
+The salt and parameters are stored in the first bytes of every encrypted file.
+Python libraries that implement these:
 
-**Progress bar freezes:**
-- Normal for large drives (30-60 minutes)
-- Drive LED should be blinking
-- Press Ctrl+C to cancel safely
+    pip install cryptography argon2-cffi
 
-## 💡 Tips
+As long as you remember your password, you can decrypt any file independently
+of this tool.
 
-- **Test first**: Use `encrypt-file` on a test file before encrypting your drive
-- **Strong passwords**: Use 12+ characters with mixed case, numbers, symbols
-- **Write down password**: Store in a safe place (password manager)
-- **Eject properly**: Always use `lock` command before physically removing drive
+Drive encryption uses macOS FileVault (AES-XTS-128) and can be managed directly
+through Disk Utility or `diskutil` as with any FileVault volume.
+
+
+## Quick reference
+
+    ./encrypto list                                    list all drives
+    ./encrypto status  "/Volumes/Name"                 check encryption status
+    ./encrypto size    "/Volumes/Name"                 show capacity and usage
+
+    sudo ./encrypto encrypt  "/Volumes/Name"           enable FileVault (one-time)
+    sudo ./encrypto decrypt  "/Volumes/Name"           remove FileVault
+    sudo ./encrypto unlock   "/Volumes/Name"           mount encrypted drive
+    sudo ./encrypto lock     "/Volumes/Name"           unmount encrypted drive
+
+    ./encrypto encrypt-file  input.txt  input.txt.enc  encrypt a file
+    ./encrypto decrypt-file  input.txt.enc  output.txt  decrypt a file
+
+
+## Troubleshooting
+
+"Permission denied" — add sudo before the command.
+
+"Drive not APFS formatted" — open Disk Utility, select the drive, click Erase,
+choose APFS as the format. This erases the drive, so back up first. After
+formatting, run encrypt again.
+
+"Wrong password" — the password does not match. There is no way to recover
+access without the correct password.
+
+
+## Advanced: raw sector encryption
+
+`encrypt-pro` and `decrypt-pro` perform direct sector-by-sector encryption of
+the raw block device. This overwrites the partition table and renders the drive
+completely inaccessible to any OS until `decrypt-pro` is run. It is intended for
+research and forensic use cases, not general use.
+
+    sudo ./encrypto encrypt-pro  /dev/disk4   raw sector encrypt (DESTRUCTIVE)
+    sudo ./encrypto decrypt-pro  /dev/disk4   raw sector decrypt
+    sudo ./encrypto encrypt-hidden /dev/disk4  raw sector encrypt with hidden volume
+
+Both commands require `YES` confirmation and display an explicit warning before
+proceeding. Back up all data first.

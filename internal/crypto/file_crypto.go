@@ -4,6 +4,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"os"
@@ -74,9 +75,17 @@ func EncryptFile(inputPath, outputPath string, password []byte) error {
 		return fmt.Errorf("failed to write header: %w", err)
 	}
 
-	// Read and encrypt file in chunks
+	// Read and encrypt file in chunks.
+	// Each chunk gets a unique nonce: first 4 bytes are the random prefix from
+	// the header nonce, last 8 bytes are the chunk counter. This guarantees
+	// nonce uniqueness across all chunks while keeping the base nonce in the
+	// header so decryption can reconstruct the same sequence.
+	chunkNonce := make([]byte, 12)
+	copy(chunkNonce, nonce[:4])
 	buf := make([]byte, 64*1024) // 64KB chunks
-	for {
+	for chunkNum := uint64(0); ; chunkNum++ {
+		binary.BigEndian.PutUint64(chunkNonce[4:], chunkNum)
+
 		n, err := inputFile.Read(buf)
 		if err != nil && err != io.EOF {
 			return fmt.Errorf("failed to read input: %w", err)
@@ -86,7 +95,7 @@ func EncryptFile(inputPath, outputPath string, password []byte) error {
 		}
 
 		// Encrypt chunk
-		ciphertext := aesgcm.Seal(nil, nonce, buf[:n], nil)
+		ciphertext := aesgcm.Seal(nil, chunkNonce, buf[:n], nil)
 
 		// Write encrypted chunk
 		if _, err := outputFile.Write(ciphertext); err != nil {
@@ -145,10 +154,13 @@ func DecryptFile(inputPath, outputPath string, password []byte) error {
 	}
 	defer outputFile.Close()
 
-	// Read and decrypt file
-	// GCM adds 16 bytes of overhead per chunk, so we need to read carefully
-	for {
-		// Read chunk size + overhead
+	// Read and decrypt file using the same counter-based nonce as encryption.
+	chunkNonce := make([]byte, 12)
+	copy(chunkNonce, nonce[:4])
+	for chunkNum := uint64(0); ; chunkNum++ {
+		binary.BigEndian.PutUint64(chunkNonce[4:], chunkNum)
+
+		// Each encrypted chunk is plaintext + 16-byte GCM tag
 		encryptedChunk := make([]byte, 64*1024+16)
 		n, err := inputFile.Read(encryptedChunk)
 		if err != nil && err != io.EOF {
@@ -159,7 +171,7 @@ func DecryptFile(inputPath, outputPath string, password []byte) error {
 		}
 
 		// Decrypt chunk
-		plaintext, err := aesgcm.Open(nil, nonce, encryptedChunk[:n], nil)
+		plaintext, err := aesgcm.Open(nil, chunkNonce, encryptedChunk[:n], nil)
 		if err != nil {
 			return fmt.Errorf("failed to decrypt: %w (wrong password?)", err)
 		}

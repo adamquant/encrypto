@@ -10,11 +10,13 @@ import (
 )
 
 type Drive struct {
-	Name        string
-	Path        string
-	Size        uint64
-	Type        DriveType
-	IsRemovable bool
+	Name         string
+	Path         string
+	MountPoint   string
+	VolumeDevice string // APFS volume device (e.g. "disk5s1"), if applicable
+	Size         uint64
+	Type         DriveType
+	IsRemovable  bool
 }
 
 type DriveType int
@@ -66,13 +68,14 @@ func (m *Manager) List() ([]Drive, error) {
 }
 
 func (m *Manager) GetDrive(path string) (*Drive, error) {
+	resolved := m.ResolvePath(path)
 	drives, err := m.List()
 	if err != nil {
 		return nil, err
 	}
 
 	for _, d := range drives {
-		if d.Path == path {
+		if d.Path == resolved {
 			return &d, nil
 		}
 	}
@@ -80,7 +83,31 @@ func (m *Manager) GetDrive(path string) (*Drive, error) {
 	return nil, fmt.Errorf("drive not found: %s", path)
 }
 
+// ResolvePath converts any path (mount point, volume path, /dev/ path) to a /dev/diskX path.
+func (m *Manager) ResolvePath(path string) string {
+	switch runtime.GOOS {
+	case "darwin":
+		return m.resolveDarwinPath(path)
+	default:
+		return path
+	}
+}
+
+// Encrypt enables native OS encryption on the drive (non-destructive on APFS — FileVault).
+// Your existing data is preserved. On macOS this requires the drive to be APFS formatted.
 func (m *Manager) Encrypt(drive *Drive, password []byte) error {
+	switch runtime.GOOS {
+	case "darwin":
+		return m.encryptDarwin(drive, password)
+	default:
+		return fmt.Errorf("native drive encryption not supported on %s; use encrypt-pro for raw sector encryption", runtime.GOOS)
+	}
+}
+
+// EncryptPro performs raw sector-by-sector encryption (DESTRUCTIVE).
+// Overwrites the partition table and encrypts every sector in-place.
+// The drive becomes completely inaccessible to the OS until decrypt-pro is run.
+func (m *Manager) EncryptPro(drive *Drive, password []byte) error {
 	if !drive.IsRemovable {
 		return fmt.Errorf("drive is not removable: %s", drive.Path)
 	}
@@ -91,10 +118,10 @@ func (m *Manager) Encrypt(drive *Drive, password []byte) error {
 	}
 	defer handle.Close()
 
-	// Check if already encrypted
+	// Check if already encrypted with the custom header
 	existingHeader, err := m.readHeader(handle)
 	if err == nil && string(existingHeader.Magic[:]) == HeaderMagic {
-		return fmt.Errorf("drive is already encrypted")
+		return fmt.Errorf("drive is already encrypted with encrypt-pro")
 	}
 
 	header, err := createHeader(password)
@@ -158,32 +185,14 @@ func (m *Manager) EncryptWithHidden(drive *Drive, primaryPassword, hiddenPasswor
 	return nil
 }
 
+// Unlock mounts a FileVault-encrypted APFS volume using the given password.
 func (m *Manager) Unlock(drive *Drive, password []byte) error {
-	handle, err := m.openDrive(drive.Path)
-	if err != nil {
-		return err
+	switch runtime.GOOS {
+	case "darwin":
+		return m.unlockDarwin(drive, password)
+	default:
+		return fmt.Errorf("native drive unlock not supported on %s", runtime.GOOS)
 	}
-	defer handle.Close()
-
-	header, err := m.readHeader(handle)
-	if err != nil {
-		return err
-	}
-
-	key, _, err := deriveKeyFromPassword(password, header)
-	if err != nil {
-		return err
-	}
-
-	if !verifyKey(key, header) {
-		return fmt.Errorf("invalid password")
-	}
-
-	if err := m.mountDrive(drive.Path); err != nil {
-		return err
-	}
-
-	return nil
 }
 
 func (m *Manager) UnlockWithHidden(drive *Drive, password []byte, revealHidden bool) error {
@@ -214,7 +223,19 @@ func (m *Manager) UnlockWithHidden(drive *Drive, password []byte, revealHidden b
 	return nil
 }
 
+// Decrypt removes native OS encryption from the drive (non-destructive — FileVault disable).
 func (m *Manager) Decrypt(drive *Drive, password []byte) error {
+	switch runtime.GOOS {
+	case "darwin":
+		return m.decryptDarwin(drive, password)
+	default:
+		return fmt.Errorf("native drive decryption not supported on %s; use decrypt-pro for raw sector decryption", runtime.GOOS)
+	}
+}
+
+// DecryptPro reverses encrypt-pro: decrypts every sector in-place and restores the raw device.
+// The filesystem was destroyed by encrypt-pro and will NOT be automatically restored.
+func (m *Manager) DecryptPro(drive *Drive, password []byte) error {
 	if !drive.IsRemovable {
 		return fmt.Errorf("drive is not removable: %s", drive.Path)
 	}
@@ -230,9 +251,8 @@ func (m *Manager) Decrypt(drive *Drive, password []byte) error {
 		return fmt.Errorf("failed to read header: %w", err)
 	}
 
-	// Verify this is an encrypto drive
 	if string(header.Magic[:]) != HeaderMagic {
-		return fmt.Errorf("drive is not encrypted with encrypto")
+		return fmt.Errorf("drive is not encrypted with encrypt-pro (no encrypto header found)")
 	}
 
 	key, _, err := deriveKeyFromPassword(password, header)
@@ -251,12 +271,14 @@ func (m *Manager) Decrypt(drive *Drive, password []byte) error {
 	return nil
 }
 
+// Lock unmounts (locks) the drive's volume.
 func (m *Manager) Lock(drive *Drive) error {
-	if err := m.unmountDrive(drive.Path); err != nil {
-		return err
+	switch runtime.GOOS {
+	case "darwin":
+		return m.lockDarwin(drive)
+	default:
+		return m.unmountDrive(drive.Path)
 	}
-
-	return nil
 }
 
 // Status represents the encryption status of a drive
@@ -267,46 +289,44 @@ type Status struct {
 	IsMounted   bool
 	DeviceName  string
 	DevicePath  string
+	Method      string // "apfs" for FileVault, "raw" for encrypt-pro, "" if not encrypted
 	Error       string
 }
 
-// CheckStatus checks if a drive is encrypted and returns its status
+// CheckStatus checks if a drive is encrypted and returns its status.
 func (m *Manager) CheckStatus(drivePath string) (*Status, error) {
-	status := &Status{
-		DevicePath: drivePath,
+	switch runtime.GOOS {
+	case "darwin":
+		return m.checkStatusDarwin(drivePath)
+	default:
+		return m.checkStatusRaw(drivePath)
 	}
+}
 
-	// Try to open the drive
+// checkStatusRaw is the fallback for non-Darwin platforms: checks for the custom encrypto-pro header.
+func (m *Manager) checkStatusRaw(drivePath string) (*Status, error) {
+	status := &Status{DevicePath: drivePath}
+
 	handle, err := m.openDrive(drivePath)
 	if err != nil {
-		status.Error = fmt.Sprintf("Cannot open drive: %v", err)
+		status.Error = fmt.Sprintf("cannot open drive: %v", err)
 		return status, nil
 	}
 	defer handle.Close()
 
-	// Try to read header
 	header, err := m.readHeader(handle)
 	if err != nil {
-		// No valid header found - drive is not encrypted
-		status.IsEncrypted = false
 		return status, nil
 	}
 
-	// Check magic
-	if string(header.Magic[:]) != HeaderMagic {
-		status.IsEncrypted = false
-		status.Error = "Invalid header magic"
-		return status, nil
+	if string(header.Magic[:]) == HeaderMagic {
+		status.IsEncrypted = true
+		status.Method = "raw"
+		status.Version = header.Version
+		status.HasHidden = header.HasHidden
 	}
 
-	// Drive is encrypted
-	status.IsEncrypted = true
-	status.Version = header.Version
-	status.HasHidden = header.HasHidden
-
-	// Check if mounted (platform-specific)
 	status.IsMounted = m.isDriveMounted(drivePath)
-
 	return status, nil
 }
 

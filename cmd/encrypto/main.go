@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"syscall"
 
@@ -26,6 +27,10 @@ func main() {
 		handleEncrypt(os.Args[2:])
 	case "decrypt":
 		handleDecrypt(os.Args[2:])
+	case "encrypt-pro":
+		handleEncryptPro(os.Args[2:])
+	case "decrypt-pro":
+		handleDecryptPro(os.Args[2:])
 	case "encrypt-file":
 		handleEncryptFile(os.Args[2:])
 	case "decrypt-file":
@@ -38,6 +43,8 @@ func main() {
 		handleStatus(os.Args[2:])
 	case "list":
 		handleList()
+	case "size":
+		handleSize(os.Args[2:])
 	case "encrypt-hidden":
 		handleEncryptHidden(os.Args[2:])
 	default:
@@ -48,22 +55,28 @@ func main() {
 }
 
 func printUsage() {
-	fmt.Println("encrypto - Cross-platform full disk encryption")
+	fmt.Println("encrypto - Drive & file encryption")
 	fmt.Println()
 	fmt.Println("Usage:")
-	fmt.Println("  encrypto encrypt <drive-path>          Encrypt a drive (60+ min)")
-	fmt.Println("  encrypto decrypt <drive-path>          Decrypt a drive (60+ min)")
+	fmt.Println("  encrypto encrypt <drive>               Enable FileVault on APFS drive (safe, non-destructive)")
+	fmt.Println("  encrypto decrypt <drive>               Remove FileVault from APFS drive")
+	fmt.Println("  encrypto unlock <drive>                Mount an encrypted APFS drive")
+	fmt.Println("  encrypto lock <drive>                  Unmount a drive")
+	fmt.Println("  encrypto status <drive>                Check encryption status")
+	fmt.Println("  encrypto list                          List available drives")
+	fmt.Println("  encrypto size <path>                   Show size of drive, volume, or folder")
+	fmt.Println()
 	fmt.Println("  encrypt-file <file> [output]           Encrypt a file (instant)")
 	fmt.Println("    1 arg:  Encrypt in-place (replaces original)")
 	fmt.Println("    2 args: Create new encrypted file")
 	fmt.Println("  decrypt-file <file> [output]           Decrypt a file (instant)")
 	fmt.Println("    1 arg:  Decrypt in-place (replaces encrypted file)")
 	fmt.Println("    2 args: Create new decrypted file")
-	fmt.Println("  encrypto unlock <drive-path>           Unlock an encrypted drive")
-	fmt.Println("  encrypto lock <drive-path>             Lock (unmount) a drive")
-	fmt.Println("  encrypto status <drive-path>           Check drive encryption status")
-	fmt.Println("  encrypto list                          List available drives")
-	fmt.Println("  encrypto encrypt-hidden <drive>        Encrypt with hidden volume")
+	fmt.Println()
+	fmt.Println("  [ADVANCED] Raw sector encryption — DESTROYS filesystem, use with caution:")
+	fmt.Println("  encrypto encrypt-pro <drive>           Raw sector encrypt (wipes partition table)")
+	fmt.Println("  encrypto decrypt-pro <drive>           Raw sector decrypt (restore raw device)")
+	fmt.Println("  encrypto encrypt-hidden <drive>        Raw sector encrypt with hidden volume")
 }
 
 func handleList() {
@@ -85,6 +98,9 @@ func handleList() {
 		fmt.Printf("  %s (%s) - %d GB %s\n",
 			d.Path, d.Name, d.Size/(1024*1024*1024),
 			d.Type)
+		if d.MountPoint != "" {
+			fmt.Printf("    mounted at: %s\n", d.MountPoint)
+		}
 		if d.IsRemovable {
 			fmt.Println("    [removable]")
 		}
@@ -97,9 +113,9 @@ func handleEncrypt(args []string) {
 		os.Exit(1)
 	}
 
-	drivePath := args[0]
-
 	manager := drive.NewManager()
+	drivePath := manager.ResolvePath(args[0])
+
 	drives, err := manager.List()
 	if err != nil {
 		fmt.Printf("Error listing drives: %v\n", err)
@@ -124,14 +140,19 @@ func handleEncrypt(args []string) {
 		os.Exit(1)
 	}
 
-	fmt.Printf("Encrypting %s (%s)...\n", selectedDrive.Name, selectedDrive.Path)
-	fmt.Println("Warning: This will encrypt all data on the drive.")
+	fmt.Printf("Enabling FileVault encryption on %s (%s)\n", selectedDrive.Name, selectedDrive.Path)
+	fmt.Println()
+	fmt.Println("Your existing data will NOT be deleted.")
+	fmt.Println("Encryption runs in the background — the drive stays usable immediately.")
+	fmt.Println("After this, the drive will require your password to mount.")
+	fmt.Println()
+	fmt.Println("Make sure you remember your password. There is no recovery option.")
 
 	reader := bufio.NewReader(os.Stdin)
-	fmt.Print("Are you sure? (yes/no): ")
+	fmt.Print("\nContinue? (yes/no): ")
 	confirm, _ := reader.ReadString('\n')
 	if strings.TrimSpace(strings.ToLower(confirm)) != "yes" {
-		fmt.Println("Encryption cancelled")
+		fmt.Println("Cancelled")
 		return
 	}
 
@@ -160,7 +181,7 @@ func handleEncrypt(args []string) {
 		os.Exit(1)
 	}
 
-	fmt.Println("Drive encrypted successfully")
+	fmt.Println("FileVault encryption enabled. The drive is encrypting in the background.")
 }
 
 func handleDecrypt(args []string) {
@@ -169,9 +190,9 @@ func handleDecrypt(args []string) {
 		os.Exit(1)
 	}
 
-	drivePath := args[0]
-
 	manager := drive.NewManager()
+	drivePath := manager.ResolvePath(args[0])
+
 	drives, err := manager.List()
 	if err != nil {
 		fmt.Printf("Error listing drives: %v\n", err)
@@ -191,14 +212,14 @@ func handleDecrypt(args []string) {
 		os.Exit(1)
 	}
 
-	fmt.Printf("Decrypting %s (%s)...\n", selectedDrive.Name, selectedDrive.Path)
-	fmt.Println("Warning: This will decrypt all data on the drive.")
+	fmt.Printf("Removing FileVault encryption from %s (%s)\n", selectedDrive.Name, selectedDrive.Path)
+	fmt.Println("Your data will remain intact. Decryption runs in the background.")
 
 	reader := bufio.NewReader(os.Stdin)
-	fmt.Print("Are you sure? (yes/no): ")
+	fmt.Print("Continue? (yes/no): ")
 	confirm, _ := reader.ReadString('\n')
 	if strings.TrimSpace(strings.ToLower(confirm)) != "yes" {
-		fmt.Println("Decryption cancelled")
+		fmt.Println("Cancelled")
 		return
 	}
 
@@ -215,7 +236,151 @@ func handleDecrypt(args []string) {
 		os.Exit(1)
 	}
 
-	fmt.Println("Drive decrypted successfully")
+	fmt.Println("FileVault encryption removed. The drive is decrypting in the background.")
+}
+
+func handleEncryptPro(args []string) {
+	if len(args) < 1 {
+		fmt.Println("Usage: encrypto encrypt-pro <drive-path>")
+		os.Exit(1)
+	}
+
+	manager := drive.NewManager()
+	drivePath := manager.ResolvePath(args[0])
+
+	drives, err := manager.List()
+	if err != nil {
+		fmt.Printf("Error listing drives: %v\n", err)
+		os.Exit(1)
+	}
+
+	var selectedDrive *drive.Drive
+	for _, d := range drives {
+		if d.Path == drivePath {
+			selectedDrive = &d
+			break
+		}
+	}
+
+	if selectedDrive == nil {
+		fmt.Printf("Drive not found: %s\n", drivePath)
+		os.Exit(1)
+	}
+
+	if !selectedDrive.IsRemovable {
+		fmt.Printf("Error: %s is not a removable drive\n", drivePath)
+		os.Exit(1)
+	}
+
+	fmt.Println("████████████████████████████████████████████████████████")
+	fmt.Println("  WARNING: ENCRYPT-PRO — RAW SECTOR ENCRYPTION")
+	fmt.Println()
+	fmt.Printf("  Target: %s (%s)\n", selectedDrive.Name, selectedDrive.Path)
+	fmt.Println()
+	fmt.Println("  THIS WILL PERMANENTLY DESTROY:")
+	fmt.Println("    - The partition table (sector 0 overwritten with header)")
+	fmt.Println("    - All file data (every sector encrypted in-place)")
+	fmt.Println()
+	fmt.Println("  After this, the drive CANNOT be mounted by any OS.")
+	fmt.Println("  You must run decrypt-pro to restore the raw device.")
+	fmt.Println("  The filesystem will NOT be recovered — it is gone.")
+	fmt.Println()
+	fmt.Println("  BACK UP ALL DATA BEFORE PROCEEDING.")
+	fmt.Println("████████████████████████████████████████████████████████")
+
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Print("\nType YES in capitals to confirm: ")
+	confirm, _ := reader.ReadString('\n')
+	if strings.TrimSpace(confirm) != "YES" {
+		fmt.Println("Cancelled")
+		return
+	}
+
+	fmt.Print("Enter password: ")
+	password1, err := readPassword()
+	if err != nil {
+		fmt.Printf("Error reading password: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Print("Confirm password: ")
+	password2, err := readPassword()
+	if err != nil {
+		fmt.Printf("Error reading password: %v\n", err)
+		os.Exit(1)
+	}
+
+	if string(password1) != string(password2) {
+		fmt.Println("Passwords do not match")
+		os.Exit(1)
+	}
+
+	err = manager.EncryptPro(selectedDrive, password1)
+	if err != nil {
+		fmt.Printf("Encryption failed: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Println("Raw sector encryption complete.")
+}
+
+func handleDecryptPro(args []string) {
+	if len(args) < 1 {
+		fmt.Println("Usage: encrypto decrypt-pro <drive-path>")
+		os.Exit(1)
+	}
+
+	manager := drive.NewManager()
+	drivePath := manager.ResolvePath(args[0])
+
+	drives, err := manager.List()
+	if err != nil {
+		fmt.Printf("Error listing drives: %v\n", err)
+		os.Exit(1)
+	}
+
+	var selectedDrive *drive.Drive
+	for _, d := range drives {
+		if d.Path == drivePath {
+			selectedDrive = &d
+			break
+		}
+	}
+
+	if selectedDrive == nil {
+		fmt.Printf("Drive not found: %s\n", drivePath)
+		os.Exit(1)
+	}
+
+	fmt.Println("████████████████████████████████████████████████████████")
+	fmt.Println("  DECRYPT-PRO — Raw sector decryption")
+	fmt.Printf("  Target: %s (%s)\n", selectedDrive.Name, selectedDrive.Path)
+	fmt.Println("  Note: filesystem was destroyed by encrypt-pro and will")
+	fmt.Println("  not be automatically restored after this operation.")
+	fmt.Println("████████████████████████████████████████████████████████")
+
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Print("\nContinue? (yes/no): ")
+	confirm, _ := reader.ReadString('\n')
+	if strings.TrimSpace(strings.ToLower(confirm)) != "yes" {
+		fmt.Println("Cancelled")
+		return
+	}
+
+	fmt.Print("Enter password: ")
+	password, err := readPassword()
+	if err != nil {
+		fmt.Printf("Error reading password: %v\n", err)
+		os.Exit(1)
+	}
+
+	err = manager.DecryptPro(selectedDrive, password)
+	if err != nil {
+		fmt.Printf("Decryption failed: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Println("Raw sector decryption complete.")
 }
 
 func handleEncryptFile(args []string) {
@@ -330,9 +495,9 @@ func handleLock(args []string) {
 		os.Exit(1)
 	}
 
-	drivePath := args[0]
-
 	manager := drive.NewManager()
+	drivePath := manager.ResolvePath(args[0])
+
 	drives, err := manager.List()
 	if err != nil {
 		fmt.Printf("Error listing drives: %v\n", err)
@@ -369,9 +534,9 @@ func handleUnlock(args []string) {
 		os.Exit(1)
 	}
 
-	drivePath := args[0]
-
 	manager := drive.NewManager()
+	drivePath := manager.ResolvePath(args[0])
+
 	drives, err := manager.List()
 	if err != nil {
 		fmt.Printf("Error listing drives: %v\n", err)
@@ -415,9 +580,8 @@ func handleStatus(args []string) {
 		os.Exit(1)
 	}
 
-	drivePath := args[0]
-
 	manager := drive.NewManager()
+	drivePath := manager.ResolvePath(args[0])
 
 	// Get drive info first
 	drives, err := manager.List()
@@ -458,11 +622,17 @@ func handleStatus(args []string) {
 
 	if status.IsEncrypted {
 		fmt.Println("║  STATUS: 🔒 ENCRYPTED                    ║")
-		fmt.Printf("║  VERSION: %-32d║\n", status.Version)
-		if status.HasHidden {
-			fmt.Println("║  HIDDEN:   Yes                           ║")
-		} else {
-			fmt.Println("║  HIDDEN:   No                            ║")
+		switch status.Method {
+		case "apfs":
+			fmt.Println("║  METHOD:  FileVault (APFS native)        ║")
+		case "raw":
+			fmt.Println("║  METHOD:  encrypt-pro (raw sector)       ║")
+			fmt.Printf("║  VERSION: %-32d║\n", status.Version)
+			if status.HasHidden {
+				fmt.Println("║  HIDDEN:  Yes                            ║")
+			} else {
+				fmt.Println("║  HIDDEN:  No                             ║")
+			}
 		}
 	} else {
 		fmt.Println("║  STATUS: 🔓 NOT ENCRYPTED                ║")
@@ -482,6 +652,83 @@ func handleStatus(args []string) {
 
 	fmt.Println("╚══════════════════════════════════════════╝")
 	fmt.Print("\033[0m")
+}
+
+func handleSize(args []string) {
+	if len(args) < 1 {
+		fmt.Println("Usage: encrypto size <path>")
+		os.Exit(1)
+	}
+
+	target := strings.TrimSuffix(args[0], "/")
+
+	// Raw device path — find in drive list
+	if strings.HasPrefix(target, "/dev/") {
+		manager := drive.NewManager()
+		drives, err := manager.List()
+		if err != nil {
+			fmt.Printf("Error listing drives: %v\n", err)
+			os.Exit(1)
+		}
+		for _, d := range drives {
+			if d.Path == target {
+				fmt.Printf("%s  %s\n", target, formatSize(d.Size))
+				return
+			}
+		}
+		fmt.Printf("Device not found: %s\n", target)
+		os.Exit(1)
+	}
+
+	info, err := os.Stat(target)
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Regular file
+	if !info.IsDir() {
+		fmt.Printf("%s  %s\n", filepath.Base(target), formatSize(uint64(info.Size())))
+		return
+	}
+
+	// Directory or volume — show volume stats via statfs
+	var stat syscall.Statfs_t
+	if err := syscall.Statfs(target, &stat); err != nil {
+		fmt.Printf("Error getting stats: %v\n", err)
+		os.Exit(1)
+	}
+
+	blockSize := uint64(stat.Bsize)
+	total := stat.Blocks * blockSize
+	free := stat.Bavail * blockSize
+	used := (stat.Blocks - stat.Bfree) * blockSize
+
+	fmt.Printf("Path:  %s\n", target)
+	fmt.Printf("Total: %s\n", formatSize(total))
+	fmt.Printf("Used:  %s\n", formatSize(used))
+	fmt.Printf("Free:  %s\n", formatSize(free))
+}
+
+func formatSize(bytes uint64) string {
+	const (
+		KB = 1024
+		MB = KB * 1024
+		GB = MB * 1024
+		TB = GB * 1024
+	)
+	switch {
+	case bytes >= TB:
+		return fmt.Sprintf("%.2f TB", float64(bytes)/TB)
+	case bytes >= GB:
+		return fmt.Sprintf("%.2f GB", float64(bytes)/GB)
+	case bytes >= MB:
+		return fmt.Sprintf("%.2f MB", float64(bytes)/MB)
+	case bytes >= KB:
+		return fmt.Sprintf("%.2f KB", float64(bytes)/KB)
+	default:
+		return fmt.Sprintf("%d B", bytes)
+	}
 }
 
 type EncryptoCrypto struct{}
@@ -509,9 +756,9 @@ func handleEncryptHidden(args []string) {
 		os.Exit(1)
 	}
 
-	drivePath := args[0]
-
 	manager := drive.NewManager()
+	drivePath := manager.ResolvePath(args[0])
+
 	drives, err := manager.List()
 	if err != nil {
 		fmt.Printf("Error listing drives: %v\n", err)
