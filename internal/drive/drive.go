@@ -205,6 +205,104 @@ func (m *Manager) ChangePassword(drive *Drive, currentPassword, newPassword []by
 	}
 }
 
+// ChangePasswordPro changes the password for an encrypt-pro encrypted drive.
+// This re-encrypts all sectors with the new password.
+func (m *Manager) ChangePasswordPro(drive *Drive, currentPassword, newPassword []byte) error {
+	if !drive.IsRemovable {
+		return fmt.Errorf("drive is not removable: %s", drive.Path)
+	}
+
+	handle, err := m.openDrive(drive.Path)
+	if err != nil {
+		return err
+	}
+	defer handle.Close()
+
+	// Read and verify current header
+	header, err := m.readHeader(handle)
+	if err != nil {
+		return fmt.Errorf("failed to read header: %w", err)
+	}
+
+	if string(header.Magic[:]) != HeaderMagic {
+		return fmt.Errorf("drive is not encrypted with encrypt-pro")
+	}
+
+	// Verify current password
+	currentKey, _, err := deriveKeyFromPassword(currentPassword, header)
+	if err != nil {
+		return fmt.Errorf("invalid current password: %w", err)
+	}
+
+	if !verifyKey(currentKey, header) {
+		return fmt.Errorf("invalid current password")
+	}
+
+	// Create new header with new password
+	newHeader, err := createHeader(newPassword)
+	if err != nil {
+		return fmt.Errorf("failed to create new header: %w", err)
+	}
+
+	// Write new header
+	if err := m.writeHeader(handle, newHeader); err != nil {
+		return fmt.Errorf("failed to write new header: %w", err)
+	}
+
+	// Re-encrypt all data with new key
+	newKey, err := crypto.DeriveKey(string(newPassword), newHeader.Salt[:])
+	if err != nil {
+		return fmt.Errorf("failed to derive new key: %w", err)
+	}
+
+	// Decrypt with old key then encrypt with new key
+	// We need to read each sector, decrypt it with old key, then re-encrypt with new key
+	cryptoEngine := crypto.New()
+	sectorSize := 512
+	buf := make([]byte, sectorSize)
+	sectorNum := uint64(1)
+	offset := int64(sectorSize)
+
+	progress := ui.NewRetroProgress(int64(drive.Size))
+	progress.Start("CHANGING PASSWORD")
+
+	for {
+		n, err := handle.Read(offset, buf)
+		if err != nil {
+			break
+		}
+		if n == 0 {
+			break
+		}
+
+		// Decrypt with old key
+		plaintext, err := cryptoEngine.Decrypt(buf[:n], currentKey, sectorNum)
+		if err != nil {
+			progress.Stop(false, "")
+			return fmt.Errorf("decrypt failed at sector %d: %w", sectorNum, err)
+		}
+
+		// Encrypt with new key
+		ciphertext, err := cryptoEngine.Encrypt(plaintext, newKey, sectorNum)
+		if err != nil {
+			progress.Stop(false, "")
+			return fmt.Errorf("encrypt failed at sector %d: %w", sectorNum, err)
+		}
+
+		if err := handle.Write(offset, ciphertext); err != nil {
+			progress.Stop(false, "")
+			return fmt.Errorf("write failed at sector %d: %w", sectorNum, err)
+		}
+
+		sectorNum++
+		offset += int64(n)
+		progress.Update(offset)
+	}
+
+	progress.Stop(true, "PASSWORD CHANGE COMPLETE")
+	return nil
+}
+
 func (m *Manager) UnlockWithHidden(drive *Drive, password []byte, revealHidden bool) error {
 	handle, err := m.openDrive(drive.Path)
 	if err != nil {

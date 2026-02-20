@@ -662,8 +662,82 @@ func handleLockPro(args []string) {
 }
 
 func handleChangePasswordPro(args []string) {
-	fmt.Println("change-password-pro not yet implemented")
-	os.Exit(1)
+	if len(args) < 1 {
+		fmt.Println("Usage: encrypto change-password-pro <drive-path>")
+		os.Exit(1)
+	}
+
+	manager := drive.NewManager()
+	drivePath := manager.ResolvePath(args[0])
+
+	drives, err := manager.List()
+	if err != nil {
+		fmt.Printf("Error listing drives: %v\n", err)
+		os.Exit(1)
+	}
+
+	var selectedDrive *drive.Drive
+	for _, d := range drives {
+		if d.Path == drivePath {
+			selectedDrive = &d
+			break
+		}
+	}
+
+	if selectedDrive == nil {
+		fmt.Printf("Drive not found: %s\n", drivePath)
+		os.Exit(1)
+	}
+
+	if !selectedDrive.IsRemovable {
+		fmt.Printf("Error: %s is not a removable drive\n", drivePath)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Changing password on %s (%s)...\n", selectedDrive.Name, selectedDrive.Path)
+	fmt.Println("This will re-encrypt all data on the drive. It takes the same time as initial encryption.")
+
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Print("Are you sure? (yes/no): ")
+	confirm, _ := reader.ReadString('\n')
+	if strings.TrimSpace(strings.ToLower(confirm)) != "yes" {
+		fmt.Println("Cancelled")
+		return
+	}
+
+	fmt.Print("Enter current password: ")
+	currentPassword, err := readPassword()
+	if err != nil {
+		fmt.Printf("Error reading password: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Print("Enter new password: ")
+	newPassword1, err := readPassword()
+	if err != nil {
+		fmt.Printf("Error reading password: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Print("Confirm new password: ")
+	newPassword2, err := readPassword()
+	if err != nil {
+		fmt.Printf("Error reading password: %v\n", err)
+		os.Exit(1)
+	}
+
+	if string(newPassword1) != string(newPassword2) {
+		fmt.Println("New passwords do not match")
+		os.Exit(1)
+	}
+
+	err = manager.ChangePasswordPro(selectedDrive, currentPassword, newPassword1)
+	if err != nil {
+		fmt.Printf("Change password failed: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Println("Password changed successfully")
 }
 
 func handleStatus(args []string) {
