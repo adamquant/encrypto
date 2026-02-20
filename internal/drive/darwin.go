@@ -62,7 +62,8 @@ type DiskUtilInfo struct {
 	MountPoint            string `plist:"MountPoint"`
 	ParentWholeDisk       string `plist:"ParentWholeDisk"`
 	WholeDisk             bool   `plist:"WholeDisk"`
-	Encrypted             bool   `plist:"Encrypted"`
+	Encrypted             bool   `plist:"Encryption"`
+	FileVault             bool   `plist:"FileVault"`
 }
 
 func (m *Manager) listDarwin() ([]Drive, error) {
@@ -301,7 +302,12 @@ func (m *Manager) lockDarwin(d *Drive) error {
 func (m *Manager) checkStatusDarwin(drivePath string) (*Status, error) {
 	status := &Status{DevicePath: drivePath}
 
-	info, err := m.getDiskInfo(strings.TrimSuffix(drivePath, "/"))
+	diskID := strings.TrimSuffix(drivePath, "/")
+	if strings.HasPrefix(diskID, "/dev/") {
+		diskID = strings.TrimPrefix(diskID, "/dev/")
+	}
+
+	info, err := m.getDiskInfo(diskID)
 	if err != nil {
 		status.Error = fmt.Sprintf("cannot get disk info: %v", err)
 		return status, nil
@@ -309,10 +315,23 @@ func (m *Manager) checkStatusDarwin(drivePath string) (*Status, error) {
 
 	status.IsMounted = info.MountPoint != ""
 
-	if info.Encrypted {
+	if info.Encrypted || info.FileVault {
 		status.IsEncrypted = true
 		status.Method = "apfs"
 		return status, nil
+	}
+
+	// Physical disk doesn't show encryption — check if this disk has APFS volumes
+	// that might be encrypted (encryption status lives on the volume, not the physical disk)
+	volumeDevice, volErr := m.findAPFSVolumeDevice(drivePath)
+	if volErr == nil && volumeDevice != "" {
+		volInfo, volErr := m.getDiskInfo(volumeDevice)
+		if volErr == nil && (volInfo.Encrypted || volInfo.FileVault) {
+			status.IsEncrypted = true
+			status.Method = "apfs"
+			status.DevicePath = "/dev/" + volumeDevice
+			return status, nil
+		}
 	}
 
 	// Not APFS encrypted — check for a custom encrypto-pro header on the raw device.

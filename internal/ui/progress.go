@@ -1,33 +1,37 @@
 package ui
 
 import (
-	"github.com/filemax/filemax/pkg/termui"
+	"fmt"
+	"time"
 )
 
-// RetroProgress wraps the shared MatrixBox for encrypto
 type RetroProgress struct {
-	box *termui.MatrixBox
+	totalBytes int64
+	operation  string
+	startTime  time.Time
 }
 
-// NewRetroProgress creates a new retro-style progress tracker
 func NewRetroProgress(totalBytes int64) *RetroProgress {
-	return &RetroProgress{
-		box: termui.NewMatrixBox("ENCRYPTO v1.0"),
-	}
+	return &RetroProgress{totalBytes: totalBytes}
 }
 
-// Start begins the progress display
 func (rp *RetroProgress) Start(operation string) {
-	rp.box.Start(operation)
+	rp.operation = operation
+	rp.startTime = time.Now()
+	fmt.Printf("\r[%s] Starting...", rp.operation)
 }
 
-// Update updates the progress
 func (rp *RetroProgress) Update(bytesProcessed int64) {
-	rp.box.UpdateProcessed(bytesProcessed)
-	rp.box.UpdateBytes(bytesProcessed, 0)
+	percent := float64(bytesProcessed) / float64(rp.totalBytes) * 100
+	elapsed := time.Since(rp.startTime).Seconds()
+	rate := float64(bytesProcessed) / elapsed / 1024 / 1024
+	fmt.Printf("\r[%s] %.1f%% (%.1f MB/s)", rp.operation, percent, rate)
 }
 
-// Stop ends the progress display
 func (rp *RetroProgress) Stop(completed bool, message string) {
-	rp.box.Stop(completed, message)
+	if completed {
+		fmt.Printf("\r[%s] 100%% - Done!\n", rp.operation)
+	} else {
+		fmt.Printf("\r[%s] Failed: %s\n", rp.operation, message)
+	}
 }

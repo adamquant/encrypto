@@ -34,7 +34,7 @@ Enable encryption:
 
 Your existing files are not deleted. Encryption runs in the background and the
 drive is immediately usable. On a large drive the background conversion may take
-some time, but you do not need to wait for it.
+hours or days, but you do not need to wait for it.
 
 Check status:
 
@@ -157,6 +157,13 @@ formatting, run encrypt again.
 
 "Wrong password" — the password does not match. There is no way to recover
 access without the correct password.
+
+To check encryption progress manually:
+
+    diskutil apfs list
+
+Look for your volume under the APFS Container. The "Encryption Progress" field
+shows conversion progress (e.g., "10.0% (Paused)" means it's 10% complete).
 
 
 ## Advanced: raw sector encryption
