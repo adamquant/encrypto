@@ -292,6 +292,39 @@ func (m *Manager) unlockDarwin(d *Drive, password []byte) error {
 	return nil
 }
 
+// changePasswordDarwin changes the password for a FileVault-encrypted APFS volume.
+func (m *Manager) changePasswordDarwin(d *Drive, currentPassword, newPassword []byte) error {
+	volumeDevice := d.VolumeDevice
+	if volumeDevice == "" {
+		var err error
+		volumeDevice, err = m.findAPFSVolumeDevice(d.Path)
+		if err != nil {
+			return fmt.Errorf("could not find APFS volume for %s: %w", d.Path, err)
+		}
+	}
+
+	// Use stdinpassphrase to pass passwords via stdin
+	cmd := exec.Command("diskutil", "apfs", "changePassphrase", volumeDevice,
+		"-user", "disk",
+		"-oldStdinpassphrase",
+		"-newStdinpassphrase")
+	cmd.Stdin = strings.NewReader(string(currentPassword) + "\n" + string(newPassword) + "\n")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		// Fallback to -passphrase flags
+		cmd := exec.Command("diskutil", "apfs", "changePassphrase", volumeDevice,
+			"-user", "disk",
+			"-oldPassphrase", string(currentPassword),
+			"-newPassphrase", string(newPassword))
+		output, err = cmd.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("change password failed: %s", strings.TrimSpace(string(output)))
+		}
+	}
+
+	return nil
+}
+
 // lockDarwin unmounts the drive's volume.
 func (m *Manager) lockDarwin(d *Drive) error {
 	// Use APFS volume device if available, otherwise fall back to mount point or path

@@ -195,6 +195,16 @@ func (m *Manager) Unlock(drive *Drive, password []byte) error {
 	}
 }
 
+// ChangePassword changes the password for a FileVault-encrypted APFS volume.
+func (m *Manager) ChangePassword(drive *Drive, currentPassword, newPassword []byte) error {
+	switch runtime.GOOS {
+	case "darwin":
+		return m.changePasswordDarwin(drive, currentPassword, newPassword)
+	default:
+		return fmt.Errorf("native drive password change not supported on %s", runtime.GOOS)
+	}
+}
+
 func (m *Manager) UnlockWithHidden(drive *Drive, password []byte, revealHidden bool) error {
 	handle, err := m.openDrive(drive.Path)
 	if err != nil {
