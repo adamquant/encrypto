@@ -62,6 +62,7 @@ func printUsage() {
 	fmt.Println("  encrypto decrypt <drive>               Remove FileVault from APFS drive")
 	fmt.Println("  encrypto unlock <drive>                Mount an encrypted APFS drive")
 	fmt.Println("  encrypto lock <drive>                  Unmount a drive")
+	fmt.Println("  encrypto change-password <drive>       Change FileVault password")
 	fmt.Println("  encrypto status <drive>                Check encryption status")
 	fmt.Println("  encrypto list                          List available drives")
 	fmt.Println("  encrypto size <path>                   Show size of drive, volume, or folder")
@@ -73,10 +74,13 @@ func printUsage() {
 	fmt.Println("    1 arg:  Decrypt in-place (replaces encrypted file)")
 	fmt.Println("    2 args: Create new decrypted file")
 	fmt.Println()
-	fmt.Println("  [ADVANCED] Raw sector encryption — DESTROYS filesystem, use with caution:")
+	fmt.Println("  [ADVANCED] Raw sector encryption — cross-platform, works on Mac/Windows/Linux:")
 	fmt.Println("  encrypto encrypt-pro <drive>           Raw sector encrypt (wipes partition table)")
-	fmt.Println("  encrypto decrypt-pro <drive>           Raw sector decrypt (restore raw device)")
-	fmt.Println("  encrypto encrypt-hidden <drive>        Raw sector encrypt with hidden volume")
+	fmt.Println("  encrypto decrypt-pro <drive>          Raw sector decrypt (restore raw device)")
+	fmt.Println("  encrypto unlock-pro <drive>           Mount an encrypt-pro encrypted drive")
+	fmt.Println("  encrypto lock-pro <drive>             Unmount an encrypt-pro encrypted drive")
+	fmt.Println("  encrypto change-password-pro <drive>  Change encrypt-pro password (re-encrypts all data)")
+	fmt.Println("  encrypto encrypt-hidden <drive>       Raw sector encrypt with hidden volume")
 }
 
 func handleList() {
