@@ -277,18 +277,37 @@ func (m *Manager) unlockDarwin(d *Drive, password []byte) error {
 		}
 	}
 
-	output, err := runCommand("diskutil", "apfs", "unlockVolume", volumeDevice, "-passphrase", string(password))
+	// Use -stdinpassphrase to pass password via stdin
+	cmd := exec.Command("diskutil", "apfs", "unlockVolume", volumeDevice, "-stdinpassphrase")
+	cmd.Stdin = strings.NewReader(string(password) + "\n")
+	_, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("unlock failed: %s", strings.TrimSpace(output))
+		// Fallback to -passphrase flag
+		cmd := exec.Command("diskutil", "apfs", "unlockVolume", volumeDevice, "-passphrase", string(password))
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("unlock failed: %s", strings.TrimSpace(string(out)))
+		}
 	}
 	return nil
 }
 
 // lockDarwin unmounts the drive's volume.
 func (m *Manager) lockDarwin(d *Drive) error {
-	target := d.MountPoint
+	// Use APFS volume device if available, otherwise fall back to mount point or path
+	target := d.VolumeDevice
+	if target == "" {
+		target = d.MountPoint
+	}
 	if target == "" {
 		target = d.Path
+	}
+	// If target is a physical disk path like /dev/disk4, we need the volume
+	if strings.HasPrefix(target, "/dev/disk") {
+		vol, err := m.findAPFSVolumeDevice(d.Path)
+		if err == nil {
+			target = vol
+		}
 	}
 	output, err := runCommand("diskutil", "unmount", target)
 	if err != nil {

@@ -842,9 +842,23 @@ func handleEncryptHidden(args []string) {
 }
 
 func readPassword() ([]byte, error) {
-	password, err := term.ReadPassword(int(syscall.Stdin))
-	fmt.Println() // Newline after password input
-	return password, err
+	// Try term.ReadPassword first (hides input)
+	fd := int(syscall.Stdin)
+	if term.IsTerminal(fd) {
+		password, err := term.ReadPassword(fd)
+		if err == nil {
+			fmt.Println()
+			return password, nil
+		}
+	}
+	// Fallback: read a line from stdin (password will be visible)
+	fmt.Print("")
+	reader := bufio.NewReader(os.Stdin)
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		return nil, err
+	}
+	return []byte(strings.TrimSpace(line)), nil
 }
 
 var encrypto = &EncryptoCrypto{}
