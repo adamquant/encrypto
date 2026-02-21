@@ -39,6 +39,14 @@ func main() {
 		handleUnlock(os.Args[2:])
 	case "lock":
 		handleLock(os.Args[2:])
+	case "change-password":
+		handleChangePassword(os.Args[2:])
+	case "unlock-pro":
+		handleUnlockPro(os.Args[2:])
+	case "lock-pro":
+		handleLockPro(os.Args[2:])
+	case "change-password-pro":
+		handleChangePasswordPro(os.Args[2:])
 	case "status":
 		handleStatus(os.Args[2:])
 	case "list":
@@ -578,6 +586,160 @@ func handleUnlock(args []string) {
 	fmt.Println("Drive unlocked successfully")
 }
 
+func handleChangePassword(args []string) {
+	if len(args) < 1 {
+		fmt.Println("Usage: encrypto change-password <drive-path>")
+		os.Exit(1)
+	}
+
+	manager := drive.NewManager()
+	drivePath := manager.ResolvePath(args[0])
+
+	drives, err := manager.List()
+	if err != nil {
+		fmt.Printf("Error listing drives: %v\n", err)
+		os.Exit(1)
+	}
+
+	var selectedDrive *drive.Drive
+	for _, d := range drives {
+		if d.Path == drivePath {
+			selectedDrive = &d
+			break
+		}
+	}
+
+	if selectedDrive == nil {
+		fmt.Printf("Drive not found: %s\n", drivePath)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Changing password on %s (%s)...\n", selectedDrive.Name, selectedDrive.Path)
+
+	fmt.Print("Enter current password: ")
+	currentPassword, err := readPassword()
+	if err != nil {
+		fmt.Printf("Error reading password: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Print("Enter new password: ")
+	newPassword1, err := readPassword()
+	if err != nil {
+		fmt.Printf("Error reading password: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Print("Confirm new password: ")
+	newPassword2, err := readPassword()
+	if err != nil {
+		fmt.Printf("Error reading password: %v\n", err)
+		os.Exit(1)
+	}
+
+	if string(newPassword1) != string(newPassword2) {
+		fmt.Println("New passwords do not match")
+		os.Exit(1)
+	}
+
+	err = manager.ChangePassword(selectedDrive, currentPassword, newPassword1)
+	if err != nil {
+		fmt.Printf("Change password failed: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Println("Password changed successfully")
+}
+
+func handleUnlockPro(args []string) {
+	fmt.Println("unlock-pro not yet implemented")
+	os.Exit(1)
+}
+
+func handleLockPro(args []string) {
+	fmt.Println("lock-pro not yet implemented")
+	os.Exit(1)
+}
+
+func handleChangePasswordPro(args []string) {
+	if len(args) < 1 {
+		fmt.Println("Usage: encrypto change-password-pro <drive-path>")
+		os.Exit(1)
+	}
+
+	manager := drive.NewManager()
+	drivePath := manager.ResolvePath(args[0])
+
+	drives, err := manager.List()
+	if err != nil {
+		fmt.Printf("Error listing drives: %v\n", err)
+		os.Exit(1)
+	}
+
+	var selectedDrive *drive.Drive
+	for _, d := range drives {
+		if d.Path == drivePath {
+			selectedDrive = &d
+			break
+		}
+	}
+
+	if selectedDrive == nil {
+		fmt.Printf("Drive not found: %s\n", drivePath)
+		os.Exit(1)
+	}
+
+	if !selectedDrive.IsRemovable {
+		fmt.Printf("Error: %s is not a removable drive\n", drivePath)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Changing password on %s (%s)...\n", selectedDrive.Name, selectedDrive.Path)
+	fmt.Println("This will re-encrypt all data on the drive. It takes the same time as initial encryption.")
+
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Print("Are you sure? (yes/no): ")
+	confirm, _ := reader.ReadString('\n')
+	if strings.TrimSpace(strings.ToLower(confirm)) != "yes" {
+		fmt.Println("Cancelled")
+		return
+	}
+
+	fmt.Print("Enter current password: ")
+	currentPassword, err := readPassword()
+	if err != nil {
+		fmt.Printf("Error reading password: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Print("Enter new password: ")
+	newPassword1, err := readPassword()
+	if err != nil {
+		fmt.Printf("Error reading password: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Print("Confirm new password: ")
+	newPassword2, err := readPassword()
+	if err != nil {
+		fmt.Printf("Error reading password: %v\n", err)
+		os.Exit(1)
+	}
+
+	if string(newPassword1) != string(newPassword2) {
+		fmt.Println("New passwords do not match")
+		os.Exit(1)
+	}
+
+	err = manager.ChangePasswordPro(selectedDrive, currentPassword, newPassword1)
+	if err != nil {
+		fmt.Printf("Change password failed: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Println("Password changed successfully")
+}
+
 func handleStatus(args []string) {
 	if len(args) < 1 {
 		fmt.Println("Usage: encrypto status <drive-path>")
@@ -846,7 +1008,7 @@ func handleEncryptHidden(args []string) {
 }
 
 func readPassword() ([]byte, error) {
-	// Try term.ReadPassword first (hides input)
+	// Try term.ReadPassword first (hides input) - only works in terminal
 	fd := int(syscall.Stdin)
 	if term.IsTerminal(fd) {
 		password, err := term.ReadPassword(fd)
@@ -855,14 +1017,13 @@ func readPassword() ([]byte, error) {
 			return password, nil
 		}
 	}
-	// Fallback: read a line from stdin (password will be visible)
-	fmt.Print("")
-	reader := bufio.NewReader(os.Stdin)
-	line, err := reader.ReadString('\n')
+	// Fallback: read from stdin using fmt.Scan (works with pipes)
+	var password string
+	_, err := fmt.Scan(&password)
 	if err != nil {
 		return nil, err
 	}
-	return []byte(strings.TrimSpace(line)), nil
+	return []byte(password), nil
 }
 
 var encrypto = &EncryptoCrypto{}
